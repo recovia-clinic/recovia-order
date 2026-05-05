@@ -526,7 +526,7 @@
 </header>
 
 <!-- GAS URL 설정 -->
-<div class="config-bar">
+<div class="config-bar" style="display:none;">
   <span>⚙ GAS URL</span>
   <input type="text" id="gasUrlInput" placeholder="https://script.google.com/macros/s/.../exec  (발주재고 GAS URL)">
   <button class="btn-sm btn-mint" onclick="saveGasUrl()">저장</button>
@@ -691,15 +691,6 @@ const CLINIC_LIST = [
   {
     클리닉코드: 'RECOVIA001',
     클리닉명: '레코바 피부과의원 (본원)',
-    원장명: '',
-    전화번호: '',
-    담당자: '',
-    담당자연락처: '',
-    적용중할인율: '0',
-  },
-  {
-    클리닉코드: 'STAFF-001',
-    클리닉명: '레코바 직원용 (임시)',
     원장명: '',
     전화번호: '',
     담당자: '',
@@ -913,7 +904,10 @@ function loadGasUrl() {
 }
 
 function getGasUrl() {
-  return document.getElementById('gasUrlInput').value.trim()
+  // ★ 발주재고 GAS URL 하드코딩 (변경 시 이 값만 수정)
+  const HARDCODED_GAS_URL = 'https://script.google.com/macros/s/AKfycbwG9CGg00hvYuy9UZFRULssF1kThI0nuz4-3t-P39cvZUH5KM_7pwB8p8n2STGExPjl3g/exec';
+  return HARDCODED_GAS_URL
+      || document.getElementById('gasUrlInput').value.trim()
       || localStorage.getItem('recovia_order_gas_url') || '';
 }
 
@@ -1061,16 +1055,35 @@ async function saveOrder() {
   let gasOk = false, gasMsg = '';
   let notionOk = false;
 
-  // ① Sheets(GAS) 저장
+  // ① Sheets(GAS) 저장 — items 배열을 행별로 분리 전송
   if (gasUrl) {
     try {
-      const res = await fetch(gasUrl, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      gasOk = json.ok || json.success || false;
-      gasMsg = json.msg || json.error || '';
+      // 제품이 여러 개면 각 행별로 전송
+      const rowsToSend = items.map((item, idx) => ({
+        action: 'addOrder',
+        클리닉코드: payload.클리닉코드,
+        클리닉명: payload.클리닉명,
+        제품코드: '',
+        제품명: item.name,
+        수량: item.qty,
+        단가: item.unitPrice,
+        적용할인율: payload.적용할인율,
+        공급가: item.sub - Math.round(item.sub * payload.적용할인율 / 100),
+        비고: idx === 0
+          ? `결제조건: ${payload.결제조건} | 배송: ${payload.배송요청사항}`
+          : '',
+      }));
+
+      let allOk = true;
+      for (const row of rowsToSend) {
+        const res = await fetch(gasUrl, {
+          method: 'POST',
+          body: JSON.stringify(row),
+        });
+        const json = await res.json();
+        if (!json.ok) { allOk = false; gasMsg = json.error || '저장 실패'; }
+      }
+      gasOk = allOk;
     } catch (e) {
       gasMsg = e.message;
     }
